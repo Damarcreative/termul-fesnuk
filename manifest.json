@@ -7,7 +7,7 @@
         "storage"
     ],
     "host_permissions": [
-        "https://www.facebook.com/*",
+        "*://*.facebook.com/*",
         "http://localhost:3000/*"
     ],
     "action": {
@@ -19,7 +19,7 @@
     "content_scripts": [
         {
             "matches": [
-                "https://www.facebook.com/*"
+                "*://*.facebook.com/*"
             ],
             "js": [
                 "content.js"

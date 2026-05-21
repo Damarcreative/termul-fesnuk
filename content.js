@@ -250,21 +250,22 @@ let isExtensionEnabled = true;
 async function scanArticles() {
     if (!isExtensionEnabled) return;
 
-    const articles = document.querySelectorAll("div[role='article']");
+    const articles = document.querySelectorAll("[role='article']");
     const pendingCheck = [];
     const articleDataList = [];
 
     for (const article of articles) {
         if (article.dataset.termulProcessed === "1") continue;
         
-        const links = article.querySelectorAll("a[href*='facebook.com']");
+        const links = article.querySelectorAll("a");
         let authorLink = null;
         let identity = null;
 
         for (const link of links) {
-            const text = link.innerText.trim();
-            const hasImg = link.querySelector('img, svg, image');
-            if (text.length > 0 && text.length < 60 && !hasImg) {
+            if (!link.href || !link.href.includes("facebook.com")) continue;
+
+            const text = link.innerText?.trim() || "";
+            if (text.length > 0 && text.length < 60) {
                 const id = extractIdentity(link);
                 if (id) {
                     authorLink = link;
