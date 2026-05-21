@@ -17,8 +17,36 @@
         </label>
     </div>
 
+    <hr>
+
     <div class="row">
-        <button id="clearData">Clear Database</button>
+        <label>Server URL:</label>
+        <input type="text" id="serverUrl" placeholder="http://localhost:3000">
+        <button id="saveServerBtn" style="margin-top: 5px;">Save & Ping</button>
+    </div>
+
+    <div class="row">
+        <small>Status: <span id="serverStatus">Checking...</span></small>
+    </div>
+
+    <hr>
+
+    <div class="row">
+        <input type="text" id="searchInput" placeholder="Cari nama...">
+    </div>
+
+    <div class="table-container">
+        <table id="dataTable">
+            <thead>
+                <tr>
+                    <th>Nama</th>
+                    <th>Profil</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data will be populated here -->
+            </tbody>
+        </table>
     </div>
 
     <script src="popup.js"></script>

@@ -7,6 +7,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get("/ping", (req, res) => {
+    res.json({ status: "ok" });
+});
+
 app.get("/check/:type/:value", (req, res) => {
     const { type, value } = req.params;
 
@@ -29,6 +33,36 @@ app.get("/check/:type/:value", (req, res) => {
             exists: !!row,
             data: row || null
         });
+    });
+});
+
+app.post("/check-batch", (req, res) => {
+    const { identities } = req.body;
+    if (!identities || identities.length === 0) return res.json([]);
+
+    const ids = identities.filter(i => i.type === 'id').map(i => i.value);
+    const usernames = identities.filter(i => i.type === 'username').map(i => i.value);
+
+    let conditions = [];
+    let params = [];
+
+    if (ids.length > 0) {
+        conditions.push(`fb_user_id IN (${ids.map(() => '?').join(',')})`);
+        params.push(...ids);
+    }
+
+    if (usernames.length > 0) {
+        conditions.push(`fb_username IN (${usernames.map(() => '?').join(',')})`);
+        params.push(...usernames);
+    }
+
+    if (conditions.length === 0) return res.json([]);
+
+    const sql = `SELECT fb_user_id, fb_username FROM labels WHERE ${conditions.join(' OR ')}`;
+
+    db.all(sql, params, (err, rows) => {
+        if (err) return res.status(500).json([]);
+        res.json(rows);
     });
 });
 

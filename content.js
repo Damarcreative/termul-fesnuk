@@ -1,39 +1,59 @@
 console.log("FB TERMUL loaded");
 
-const API = "http://localhost:3000";
+let API = "http://localhost:3000";
 
-function extractIdentity(url) {
+function extractIdentity(link) {
     try {
-        const cleanUrl = url.split("?")[0];
+        // Try to get ID from data-hovercard
+        const hovercard = link.getAttribute("data-hovercard");
+        if (hovercard) {
+            const idMatch = hovercard.match(/id=(\d+)/);
+            if (idMatch) {
+                return { type: "id", value: idMatch[1] };
+            }
+        }
+        
+        const href = link.href;
+        if (!href || !href.includes("facebook.com")) return null;
 
-        const idMatch = cleanUrl.match(/id=(\d+)/);
-        if (idMatch) {
-            return {
-                type: "id",
-                value: idMatch[1]
-            };
+        const urlObj = new URL(href);
+        const params = urlObj.searchParams;
+
+        // Try from URL params
+        if (params.get("id")) {
+            return { type: "id", value: params.get("id") };
         }
 
-        const groupUserMatch = cleanUrl.match(/\/user\/(\d+)/);
+        const path = urlObj.pathname;
+
+        // Try from groups URL
+        const groupUserMatch = path.match(/\/user\/(\d+)/);
         if (groupUserMatch) {
-            return {
-                type: "id",
-                value: groupUserMatch[1]
-            };
+            return { type: "id", value: groupUserMatch[1] };
         }
 
-        const usernameMatch = cleanUrl.match(/facebook\.com\/([^/?]+)/);
-        if (usernameMatch) {
-            return {
-                type: "username",
-                value: usernameMatch[1]
-            };
+        // Try from people URL (e.g. /people/Name/100012345)
+        const peopleMatch = path.match(/\/people\/[^/]+\/(\d+)/);
+        if (peopleMatch) {
+            return { type: "id", value: peopleMatch[1] };
         }
 
-        return null;
-    } catch (err) {
-        return null;
-    }
+        // Fallback to username only if no ID found and it's not a generic path
+        const pathSegments = path.split('/').filter(p => p);
+        if (pathSegments.length > 0) {
+            const firstSegment = pathSegments[0];
+            const ignoreList = [
+                'people', 'groups', 'profile.php', 'pages', 'watch', 
+                'marketplace', 'gaming', 'events', 'stories', 'reel', 
+                'hashtag', 'photo.php', 'permalink.php'
+            ];
+            if (!ignoreList.includes(firstSegment.toLowerCase())) {
+                return { type: "username", value: firstSegment };
+            }
+        }
+    } catch (err) { }
+    
+    return null;
 }
 
 function createBadge() {
@@ -57,7 +77,9 @@ function createActionTextButton(isActive) {
     btn.style.cursor = "pointer";
     btn.style.fontWeight = "bold";
     btn.style.fontSize = "12px";
-    btn.style.color = isActive ? "red" : "inherit";
+    
+    // Facebook uses var(--secondary-text) for normal action text which adapts to dark/light mode automatically
+    btn.style.color = isActive ? "#ff4444" : "var(--secondary-text, #b0b3b8)";
     btn.style.marginLeft = "12px";
     
     btn.onmouseover = () => { btn.style.textDecoration = "underline"; };
@@ -79,29 +101,15 @@ function createIconButton() {
     btn.style.alignItems = "center";
     btn.style.justifyContent = "center";
     
-    btn.onmouseover = () => { btn.style.background = "rgba(255, 0, 0, 0.1)"; };
-    btn.onmouseout = () => { btn.style.background = "transparent"; };
+    // Background pill to make the icon visible in both modes
+    btn.style.backgroundColor = "var(--secondary-button-background, rgba(128, 128, 128, 0.2))"; 
+    btn.onmouseover = () => { btn.style.backgroundColor = "var(--secondary-button-background-floating, rgba(128, 128, 128, 0.4))"; };
+    btn.onmouseout = () => { btn.style.backgroundColor = "var(--secondary-button-background, rgba(128, 128, 128, 0.2))"; };
 
     return btn;
 }
 
 const userCache = new Map();
-
-async function checkUser(identity) {
-    const cacheKey = `${identity.type}_${identity.value}`;
-    if (userCache.has(cacheKey)) {
-        return userCache.get(cacheKey);
-    }
-    
-    try {
-        const response = await fetch(`${API}/check/${identity.type}/${identity.value}`);
-        const data = await response.json();
-        userCache.set(cacheKey, data);
-        return data;
-    } catch (err) {
-        return { exists: false };
-    }
-}
 
 async function saveUser(data) {
     const identityType = data.fb_user_id ? "id" : "username";
@@ -144,35 +152,7 @@ function getCommentText(container) {
     return text;
 }
 
-async function processArticle(article) {
-    if (article.dataset.termulProcessed === "1") return;
-    article.dataset.termulProcessed = "1";
-
-    const links = article.querySelectorAll("a[href*='facebook.com']");
-    let authorLink = null;
-    let identity = null;
-
-    // Find the first valid textual profile link (likely the author)
-    for (const link of links) {
-        const text = link.innerText.trim();
-        const hasImg = link.querySelector('img, svg, image');
-        
-        if (text.length > 0 && text.length < 60 && !hasImg) {
-            const id = extractIdentity(link.href);
-            if (id) {
-                authorLink = link;
-                identity = id;
-                break;
-            }
-        }
-    }
-
-    if (!authorLink || !identity) return;
-
-    const result = await checkUser(identity);
-    let isTermul = result.exists;
-
-    // 1. Give TERMUL badge to the right of the name
+function applyTermulToArticle(article, authorLink, identity, isTermul) {
     const toggleBadge = (show) => {
         let badge = authorLink.parentElement.querySelector(".termul-badge");
         if (show && !badge) {
@@ -185,7 +165,6 @@ async function processArticle(article) {
     };
     toggleBadge(isTermul);
 
-    // Determine if it's a comment or a post
     const isComment = article.getAttribute("aria-label")?.toLowerCase().includes("comment") || 
                       article.getAttribute("aria-label")?.toLowerCase().includes("komentar") ||
                       article.closest("ul") !== null;
@@ -194,7 +173,6 @@ async function processArticle(article) {
         if (isTermul) {
             await deleteUser(identity);
             isTermul = false;
-            // alert("User dihapus dari TERMUL");
         } else {
             await saveUser({
                 fb_user_id: identity.type === "id" ? identity.value : "",
@@ -206,17 +184,15 @@ async function processArticle(article) {
                 label: "TERMUL"
             });
             isTermul = true;
-            // alert("User ditandai TERMUL");
         }
 
         if (btn && btn.classList.contains("termul-text-btn")) {
-            btn.style.color = isTermul ? "red" : "inherit";
+            btn.style.color = isTermul ? "#ff4444" : "var(--secondary-text, #b0b3b8)";
         }
         toggleBadge(isTermul);
     };
 
     if (isComment) {
-        // 2. Button in comments next to "Balas" / "Reply"
         if (!article.querySelector(".termul-text-btn")) {
             const buttons = article.querySelectorAll('div[role="button"], span');
             let replyBtn = null;
@@ -240,7 +216,6 @@ async function processArticle(article) {
             }
         }
     } else {
-        // 3. Icon Button in posts, right next to the three dots
         const menus = article.querySelectorAll("div[aria-haspopup='menu']");
         let threeDots = null;
         for (const menu of menus) {
@@ -261,7 +236,6 @@ async function processArticle(article) {
                 threeDots.parentElement.insertBefore(iconBtn, threeDots);
             }
         } else {
-            // Fallback if three dots not found
             if (!authorLink.parentElement.querySelector(".termul-text-btn")) {
                 const btn = createActionTextButton(isTermul);
                 btn.onclick = () => handleToggle(btn);
@@ -271,26 +245,110 @@ async function processArticle(article) {
     }
 }
 
-async function scanArticles() {
-    chrome.storage.local.get(["enabled"], async (result) => {
-        if (result.enabled === false) return;
+let isExtensionEnabled = true;
 
-        const articles = document.querySelectorAll("div[role='article']");
-        for (const article of articles) {
-            try {
-                await processArticle(article);
-            } catch (err) {}
+async function scanArticles() {
+    if (!isExtensionEnabled) return;
+
+    const articles = document.querySelectorAll("div[role='article']");
+    const pendingCheck = [];
+    const articleDataList = [];
+
+    for (const article of articles) {
+        if (article.dataset.termulProcessed === "1") continue;
+        
+        const links = article.querySelectorAll("a[href*='facebook.com']");
+        let authorLink = null;
+        let identity = null;
+
+        for (const link of links) {
+            const text = link.innerText.trim();
+            const hasImg = link.querySelector('img, svg, image');
+            if (text.length > 0 && text.length < 60 && !hasImg) {
+                const id = extractIdentity(link);
+                if (id) {
+                    authorLink = link;
+                    identity = id;
+                    break;
+                }
+            }
         }
-    });
+
+        if (!authorLink || !identity) continue;
+        
+        article.dataset.termulProcessed = "1"; // Mark immediately to prevent duplicate checks
+
+        const cacheKey = `${identity.type}_${identity.value}`;
+        if (userCache.has(cacheKey)) {
+            applyTermulToArticle(article, authorLink, identity, userCache.get(cacheKey).exists);
+        } else {
+            // Ensure unique pending checks
+            if (!pendingCheck.some(i => i.type === identity.type && i.value === identity.value)) {
+                pendingCheck.push(identity);
+            }
+            articleDataList.push({ article, authorLink, identity, cacheKey });
+        }
+    }
+    
+    if (pendingCheck.length > 0) {
+        try {
+            const res = await fetch(`${API}/check-batch`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ identities: pendingCheck })
+            });
+            if (!res.ok) throw new Error("API not ok");
+            const termulUsers = await res.json();
+            
+            const termulSet = new Set(
+                termulUsers.map(u => u.fb_user_id)
+                    .concat(termulUsers.map(u => u.fb_username))
+                    .filter(v => v)
+            );
+            
+            for (const item of articleDataList) {
+                const isTermul = termulSet.has(item.identity.value);
+                userCache.set(item.cacheKey, { exists: isTermul });
+                applyTermulToArticle(item.article, item.authorLink, item.identity, isTermul);
+            }
+        } catch (err) {
+            console.error("Batch check error", err);
+            // Apply fallback so UI still renders even if server is down/not updated
+            for (const item of articleDataList) {
+                userCache.set(item.cacheKey, { exists: false });
+                applyTermulToArticle(item.article, item.authorLink, item.identity, false);
+            }
+        }
+    }
 }
 
-scanArticles();
-
-const observer = new MutationObserver(() => {
+// Start processing and observe mutations
+chrome.storage.local.get(["enabled", "serverUrl"], (result) => {
+    if (result.enabled !== undefined) isExtensionEnabled = result.enabled;
+    if (result.serverUrl) API = result.serverUrl;
+    
     scanArticles();
+
+    const observer = new MutationObserver(() => {
+        scanArticles();
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
 });
 
-observer.observe(document.body, {
-    childList: true,
-    subtree: true
+// Update API immediately if settings change
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === "local") {
+        if (changes.enabled) {
+            isExtensionEnabled = changes.enabled.newValue;
+        }
+        if (changes.serverUrl) {
+            API = changes.serverUrl.newValue;
+            userCache.clear();
+        }
+        scanArticles();
+    }
 });
